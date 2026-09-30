@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.Collections;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -108,5 +109,105 @@ class ShopServiceTest {
     void restockRejectsNonPositiveQuantity() {
         assertThrows(IllegalArgumentException.class, () -> shop.restock(product.id(), 0));
         assertEquals(8, shop.restock(product.id(), 3).stock());
+    }
+
+    /**
+     * 情境：管理員以不同欄位搜尋訂單，搜尋文字可能有大小寫差異或前後空白。
+     * 前置條件：小明建立一筆購買「滑鼠」的訂單；小華建立另一筆購買「鍵盤」的訂單。
+     * 操作：分別以顧客姓名、電子郵件、商品名稱及訂單狀態搜尋，並以空白查詢取得全部訂單。
+     * 預期：查詢忽略大小寫與前後空白；每個欄位只回傳符合條件的訂單，空白查詢回傳所有訂單。
+     */
+    @Test
+    void searchOrdersMatchesOrderCustomerProductAndStatusCaseInsensitively() {
+        ShopService.Product keyboard = shop.addProduct("機械鍵盤", new BigDecimal("50"), 2);
+        ShopService.Customer secondCustomer = shop.addCustomer("小華", "hua@example.com", "0987654321");
+        ShopService.Order mouseOrder = shop.placeOrder(customer.id(), Map.of(product.id(), 1));
+        ShopService.Order keyboardOrder = shop.placeOrder(secondCustomer.id(), Map.of(keyboard.id(), 1));
+
+        assertEquals(java.util.List.of(mouseOrder), shop.searchOrders(" 小明 "));
+        assertEquals(java.util.List.of(mouseOrder), shop.searchOrders("MING@EXAMPLE.COM"));
+        assertEquals(java.util.List.of(keyboardOrder), shop.searchOrders("機械鍵盤"));
+        assertEquals(java.util.List.of(mouseOrder, keyboardOrder), shop.searchOrders("processing"));
+        assertEquals(2, shop.searchOrders("  ").size());
+    }
+
+    /**
+     * 情境：搜尋條件沒有對應的訂單。
+     * 前置條件：系統中有一筆小明購買滑鼠的訂單。
+     * 操作：使用不存在的顧客／訂單關鍵字搜尋。
+     * 預期：回傳空清單，不拋出例外，也不影響既有訂單。
+     */
+    @Test
+    void searchOrdersReturnsEmptyListWhenNothingMatches() {
+        ShopService.Order order = shop.placeOrder(customer.id(), Map.of(product.id(), 1));
+
+        assertTrue(shop.searchOrders("no-such-order-or-customer").isEmpty());
+        assertEquals(order, shop.getOrder(order.id()));
+    }
+
+    /**
+     * 邊界情境：訂單的顧客編號不存在、商品編號不存在、訂單品項為 null／空集合，
+     * 或購買數量為 null、0、負數。
+     * 操作：逐一提交上述不合法訂單資料。
+     * 預期：每種情況皆以 IllegalArgumentException 拒絕，並且不建立訂單、不扣除任何庫存。
+     */
+    @Test
+    void rejectsMissingAndInvalidOrderInputsWithoutChangingState() {
+        assertThrows(IllegalArgumentException.class, () -> shop.placeOrder(999, Map.of(product.id(), 1)));
+        assertThrows(IllegalArgumentException.class, () -> shop.placeOrder(customer.id(), null));
+        assertThrows(IllegalArgumentException.class, () -> shop.placeOrder(customer.id(), Map.of()));
+        assertThrows(IllegalArgumentException.class, () -> shop.placeOrder(customer.id(), Map.of(999, 1)));
+        assertThrows(IllegalArgumentException.class, () -> shop.placeOrder(customer.id(), Map.of(product.id(), 0)));
+        assertThrows(IllegalArgumentException.class, () -> shop.placeOrder(customer.id(), Map.of(product.id(), -1)));
+        assertThrows(IllegalArgumentException.class,
+                () -> shop.placeOrder(customer.id(), Collections.singletonMap(product.id(), null)));
+
+        assertEquals(5, shop.getProduct(product.id()).stock());
+        assertTrue(shop.orders().isEmpty());
+    }
+
+    /**
+     * 邊界情境：訂單數量剛好等於現有庫存，以及庫存已耗盡後再下單。
+     * 前置條件：商品庫存為 5。
+     * 操作：先下單購買 5 件，再嘗試購買 1 件。
+     * 預期：剛好買完庫存的訂單成功且庫存為 0；後續訂單因庫存不足失敗，原訂單和庫存狀態不變。
+     */
+    @Test
+    void allowsExactAvailableStockAndRejectsOrderWhenStockIsDepleted() {
+        ShopService.Order order = shop.placeOrder(customer.id(), Map.of(product.id(), 5));
+
+        assertEquals(new BigDecimal("61.75"), order.total());
+        assertEquals(0, shop.getProduct(product.id()).stock());
+        assertThrows(IllegalArgumentException.class,
+                () -> shop.placeOrder(customer.id(), Map.of(product.id(), 1)));
+        assertEquals(1, shop.orders().size());
+        assertEquals(0, shop.getProduct(product.id()).stock());
+    }
+
+    /**
+     * 邊界情境：補貨加總超出 Java int 可表示的最大庫存。
+     * 前置條件：商品的庫存已達 Integer.MAX_VALUE。
+     * 操作：再補貨 1 件造成整數溢位。
+     * 預期：以 ArithmeticException 拒絕此次補貨，且商品庫存保留原值。
+     */
+    @Test
+    void restockOverflowLeavesStockUnchanged() {
+        ShopService.Product fullStockProduct = shop.addProduct("大量庫存商品", BigDecimal.ONE, Integer.MAX_VALUE);
+
+        assertThrows(ArithmeticException.class, () -> shop.restock(fullStockProduct.id(), 1));
+        assertEquals(Integer.MAX_VALUE, shop.getProduct(fullStockProduct.id()).stock());
+    }
+
+    /**
+     * 邊界情境：搜尋方法收到 null 查詢文字。
+     * 前置條件：系統已有訂單。
+     * 操作：以 null 呼叫訂單搜尋。
+     * 預期：將 null 視為未指定條件，回傳全部訂單，不拋出例外。
+     */
+    @Test
+    void nullOrderSearchReturnsAllOrders() {
+        ShopService.Order order = shop.placeOrder(customer.id(), Map.of(product.id(), 1));
+
+        assertEquals(java.util.List.of(order), shop.searchOrders(null));
     }
 }

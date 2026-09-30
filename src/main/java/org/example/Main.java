@@ -51,14 +51,29 @@ public class Main {
 
     private static void orderMenu() {
         while (true) {
-            System.out.println("\n--- 訂單管理 ---\n1. 建立訂單  2. 列出訂單  3. 更新狀態  0. 返回");
-            switch (readInt("請選擇：", 0, 3)) {
+            System.out.println("\n--- 訂單管理 ---\n1. 建立訂單  2. 列出訂單  3. 搜尋訂單  4. 更新狀態  0. 返回");
+            switch (readInt("請選擇：", 0, 4)) {
                 case 1 -> createOrder();
                 case 2 -> SHOP.orders().forEach(o -> System.out.printf("%d | 顧客 %d | $%s | %s | 商品 %s%n", o.id(), o.customerId(), o.total(), o.status(), o.items()));
-                case 3 -> changeStatus();
+                case 3 -> searchOrders();
+                case 4 -> changeStatus();
                 case 0 -> { return; }
             }
         }
+    }
+
+    private static void searchOrders() {
+        String query = readText("搜尋訂單編號、顧客姓名／Email、狀態或商品名稱：");
+        var results = SHOP.searchOrders(query);
+        if (results.isEmpty()) {
+            System.out.println("沒有符合條件的訂單。");
+            return;
+        }
+        results.forEach(o -> {
+            ShopService.Customer customer = SHOP.getCustomer(o.customerId());
+            System.out.printf("訂單 %d | %s <%s> | $%s | %s | 商品 %s%n",
+                    o.id(), customer.name(), customer.email(), o.total(), o.status(), o.items());
+        });
     }
 
     private static void createOrder() {
