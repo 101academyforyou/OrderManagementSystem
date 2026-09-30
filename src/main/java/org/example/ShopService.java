@@ -96,6 +96,25 @@ public class ShopService {
     public List<Customer> customers() { return List.copyOf(customers.values()); }
     public List<Order> orders() { return List.copyOf(orders.values()); }
 
+    /** Searches orders by order number, customer name or email, status, or purchased product name.
+     * A null or blank query returns all orders; matching ignores case and leading/trailing spaces.
+     */
+    public List<Order> searchOrders(String query) {
+        if (query == null || query.isBlank()) return orders();
+        String term = query.trim().toLowerCase(java.util.Locale.ROOT);
+        return orders.values().stream().filter(order -> {
+            Customer customer = customers.get(order.customerId());
+            boolean matchesOrder = Integer.toString(order.id()).contains(term);
+            boolean matchesCustomer = customer.name().toLowerCase(java.util.Locale.ROOT).contains(term)
+                    || customer.email().toLowerCase(java.util.Locale.ROOT).contains(term);
+            boolean matchesStatus = order.status().name().toLowerCase(java.util.Locale.ROOT).contains(term);
+            boolean matchesProduct = order.items().keySet().stream().map(products::get)
+                    .filter(java.util.Objects::nonNull)
+                    .anyMatch(product -> product.name().toLowerCase(java.util.Locale.ROOT).contains(term));
+            return matchesOrder || matchesCustomer || matchesStatus || matchesProduct;
+        }).toList();
+    }
+
     private Product requireProduct(int id) {
         Product p = products.get(id);
         if (p == null) throw new IllegalArgumentException("找不到商品");

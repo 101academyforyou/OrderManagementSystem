@@ -109,4 +109,38 @@ class ShopServiceTest {
         assertThrows(IllegalArgumentException.class, () -> shop.restock(product.id(), 0));
         assertEquals(8, shop.restock(product.id(), 3).stock());
     }
+
+    /**
+     * 情境：管理員以不同欄位搜尋訂單，搜尋文字可能有大小寫差異或前後空白。
+     * 前置條件：小明建立一筆購買「滑鼠」的訂單；小華建立另一筆購買「鍵盤」的訂單。
+     * 操作：分別以顧客姓名、電子郵件、商品名稱及訂單狀態搜尋，並以空白查詢取得全部訂單。
+     * 預期：查詢忽略大小寫與前後空白；每個欄位只回傳符合條件的訂單，空白查詢回傳所有訂單。
+     */
+    @Test
+    void searchOrdersMatchesOrderCustomerProductAndStatusCaseInsensitively() {
+        ShopService.Product keyboard = shop.addProduct("機械鍵盤", new BigDecimal("50"), 2);
+        ShopService.Customer secondCustomer = shop.addCustomer("小華", "hua@example.com", "0987654321");
+        ShopService.Order mouseOrder = shop.placeOrder(customer.id(), Map.of(product.id(), 1));
+        ShopService.Order keyboardOrder = shop.placeOrder(secondCustomer.id(), Map.of(keyboard.id(), 1));
+
+        assertEquals(java.util.List.of(mouseOrder), shop.searchOrders(" 小明 "));
+        assertEquals(java.util.List.of(mouseOrder), shop.searchOrders("MING@EXAMPLE.COM"));
+        assertEquals(java.util.List.of(keyboardOrder), shop.searchOrders("機械鍵盤"));
+        assertEquals(java.util.List.of(mouseOrder, keyboardOrder), shop.searchOrders("processing"));
+        assertEquals(2, shop.searchOrders("  ").size());
+    }
+
+    /**
+     * 情境：搜尋條件沒有對應的訂單。
+     * 前置條件：系統中有一筆小明購買滑鼠的訂單。
+     * 操作：使用不存在的顧客／訂單關鍵字搜尋。
+     * 預期：回傳空清單，不拋出例外，也不影響既有訂單。
+     */
+    @Test
+    void searchOrdersReturnsEmptyListWhenNothingMatches() {
+        ShopService.Order order = shop.placeOrder(customer.id(), Map.of(product.id(), 1));
+
+        assertTrue(shop.searchOrders("no-such-order-or-customer").isEmpty());
+        assertEquals(order, shop.getOrder(order.id()));
+    }
 }
